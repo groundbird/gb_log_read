@@ -37,13 +37,27 @@ def get_eachpaths(month_dires, dates_sp):
             pass
     return np.array(he10_paths), np.array(detector_paths), np.array(shield_paths)
 
+def get_time(temp):
+    """_summary_
+
+    Args:
+        temp (read_temp class): class of read_temp
+
+    Returns:
+        datetime: datetime when PTC_40K is 270mK
+    """
+    ind = np.where(np.min(np.abs(temp.temp_shield['PTC_40K[K]'] - 270)) == np.abs(temp.temp_shield['PTC_40K[K]'] - 270))[0][0]
+    time290K = temp.datetime_st + datetime.timedelta(hours = temp.elapsed_time_shield[ind])
+    time290K
+    return time290K
+
 def read_tdata(paths, header):
     datas = [pd.read_table(ipath, sep = '\s+|,', header = None, comment='#', names = header, engine='python') for ipath in paths]
     data = pd.concat(datas)
     return data
 
 class read_temp():
-    def __init__(self, st, en = None):
+    def __init__(self, st, en = None, temp_dir = TEMP_DIR):
         self.dif_day_ts = DIF_DAY_TS
         self.dif_hour_ts = DIF_HOUR_TS
         self.label_he10 = label_he10
@@ -71,7 +85,7 @@ class read_temp():
             tm_sp = self.datetime_st.timestamp() + i*self.dif_day_ts
             dates.append(datetime.datetime.fromtimestamp(tm_sp).strftime('%Y-%m-%d'))
         dates_sp = [idate.split('T')[0].split('-') for idate in dates]
-        month_dires = [os.path.join(TEMP_DIR, idate[0], idate[1]) for idate in dates_sp]
+        month_dires = [os.path.join(temp_dir, idate[0], idate[1]) for idate in dates_sp]
         
         self.he10_paths, self.detector_paths, self.shield_paths = get_eachpaths(month_dires, dates_sp)
 
@@ -84,20 +98,31 @@ class read_temp():
         tmp_data_shield = read_tdata(self.shield_paths, header_shield)
         self.temp_shield = tmp_data_shield[(tmp_data_shield['Unixtime'] > self.datetime_st.timestamp()) & (tmp_data_shield['Unixtime'] < self.datetime_en.timestamp())].reset_index(drop=True)
         
+        # calc elapsed time from start datetime
         self.elapsed_time_he10 = (self.temp_he10['Unixtime'].values - self.temp_he10['Unixtime'].values[0])/self.dif_hour_ts
         self.elapsed_time_detector = (self.temp_detector['Unixtime'].values - self.temp_detector['Unixtime'].values[0])/self.dif_hour_ts
         self.elapsed_time_shield = (self.temp_shield['Unixtime'].values - self.temp_shield['Unixtime'].values[0])/self.dif_hour_ts
+        
+        # calc elapsed time from PTC_40K of 270K
+        datetime_PTC40K_270K = get_time(self)
+        self.elapsed_time_PTC_he10 = (self.temp_he10['Unixtime'].values - datetime_PTC40K_270K.timestamp()) /self.dif_hour_ts
+        self.elapsed_time_PTC_detector = (self.temp_detector['Unixtime'].values - datetime_PTC40K_270K.timestamp())/self.dif_hour_ts
+        self.elapsed_time_PTC_shield = (self.temp_shield['Unixtime'].values - datetime_PTC40K_270K.timestamp())/self.dif_hour_ts
+        
 
 
 class comp_temp(read_temp):
-    def __init__(self, run, run1, run2):
+    def __init__(self, run, run1, run2, run_labels):
         self.temp = read_temp(run[0], run[1])
         self.temp1 = read_temp(run1[0], run1[1])
         self.temp2 = read_temp(run2[0], run2[1])
+        self.run_label = run_labels[0]
+        self.run_label1 = run_labels[1]
+        self.run_label2 = run_labels[2]
 
     def plot_comp_he10(self, log = False, ylim = False, xlim = False):
-        self.ylims_he10 = [[0.2,0.3], # He3U_HEAD
-                           [0.28,0.38], # He3I_HEAD
+        self.ylims_he10 = [[0.2,0.40], # He3U_HEAD
+                           [0.28,0.40], # He3I_HEAD
                            [0.75,0.85], # He4_HEAD
                            [0.7,6.0], # He4_FilmBurner
                            [1.0,60.0], # He4_Pump
@@ -110,9 +135,12 @@ class comp_temp(read_temp):
         plt.figure(figsize = (20,20))
         for i, (ilabel, iylim) in enumerate(zip(self.temp.label_he10, self.ylims_he10)):
             plt.subplot(4,3, i+1)
-            plt.plot(self.temp.elapsed_time_he10, self.temp.temp_he10[ilabel], label = 'run_202112')
-            plt.plot(self.temp1.elapsed_time_he10, self.temp1.temp_he10[ilabel], label = 'run_202103')
-            plt.plot(self.temp2.elapsed_time_he10, self.temp2.temp_he10[ilabel], label = 'run_202107')
+            #plt.plot(self.temp.elapsed_time_he10, self.temp.temp_he10[ilabel], label = self.run_label)
+            #plt.plot(self.temp1.elapsed_time_he10, self.temp1.temp_he10[ilabel],'--', label = self.run_label1)
+            #plt.plot(self.temp2.elapsed_time_he10, self.temp2.temp_he10[ilabel], '--',label = self.run_label2)
+            plt.plot(self.temp.elapsed_time_PTC_he10, self.temp.temp_he10[ilabel], label = self.run_label)
+            plt.plot(self.temp1.elapsed_time_PTC_he10, self.temp1.temp_he10[ilabel],'--', label = self.run_label1)
+            plt.plot(self.temp2.elapsed_time_PTC_he10, self.temp2.temp_he10[ilabel], '--',label = self.run_label2)
             plt.title(ilabel.split('[')[0])
             plt.ylabel('temperature [K]')
             plt.xlabel('elapsed time [h]')
@@ -128,14 +156,14 @@ class comp_temp(read_temp):
         os.makedirs('fig/', exist_ok=True)
         ntime = datetime.datetime.strftime(datetime.datetime.now(tz = datetime.timezone.utc), STR_FMT)
         ntime = 'he10_'+ ntime + '.jpg'
-        save_path = os.path.join('fig/', ntime)
+        save_path = os.path.join('/data/sueno/home/workspace/script/gb_log_read/fig/', ntime)
         plt.savefig(save_path)
         plt.clf()
         plt.close()
 
     def plot_comp_det_shield(self, log = False, ylim = False, xlim = False):
-        self.ylims_detector = [[0.2, 0.3], # detector
-                               [0.2, 0.3], # 250mK_stage
+        self.ylims_detector = [[0.2, 0.35], # detector
+                               [0.2, 0.35], # 250mK_stage
                                [0.3, 0.4] # 350mK_stage
                               ]
 
@@ -152,9 +180,12 @@ class comp_temp(read_temp):
         plt.figure(figsize = (20,20))
         for i, (ilabel, iylim) in enumerate(zip(self.temp.label_detector, self.ylims_detector)):
             plt.subplot(4, 3, i+1)
-            plt.plot(self.temp.elapsed_time_detector, self.temp.temp_detector[ilabel], label = 'run_202112')
-            plt.plot(self.temp1.elapsed_time_detector, self.temp1.temp_detector[ilabel], label = 'run_202103')
-            plt.plot(self.temp2.elapsed_time_detector, self.temp2.temp_detector[ilabel], label = 'run_202107')
+            #plt.plot(self.temp.elapsed_time_detector, self.temp.temp_detector[ilabel], label = self.run_label)
+            #plt.plot(self.temp1.elapsed_time_detector, self.temp1.temp_detector[ilabel], '--',label = self.run_label1)
+            #plt.plot(self.temp2.elapsed_time_detector, self.temp2.temp_detector[ilabel], '--',label = self.run_label2)
+            plt.plot(self.temp.elapsed_time_PTC_detector, self.temp.temp_detector[ilabel], label = self.run_label)
+            plt.plot(self.temp1.elapsed_time_PTC_detector, self.temp1.temp_detector[ilabel], '--',label = self.run_label1)
+            plt.plot(self.temp2.elapsed_time_PTC_detector, self.temp2.temp_detector[ilabel], '--',label = self.run_label2)
             plt.title(ilabel.split('[')[0])
             plt.ylabel('temperature [K]')
             plt.xlabel('elapsed time [h]')
@@ -170,9 +201,12 @@ class comp_temp(read_temp):
                 
         for i, (ilabel, iylim) in enumerate(zip(self.temp.label_shield, self.ylims_shield)):
             plt.subplot(4, 3, i+4)
-            plt.plot(self.temp.elapsed_time_shield, self.temp.temp_shield[ilabel], label = 'run_202112')
-            plt.plot(self.temp1.elapsed_time_shield, self.temp1.temp_shield[ilabel], label = 'run_202103')
-            plt.plot(self.temp2.elapsed_time_shield, self.temp2.temp_shield[ilabel], label = 'run_202107')
+            #plt.plot(self.temp.elapsed_time_shield, self.temp.temp_shield[ilabel],label = self.run_label)
+            #plt.plot(self.temp1.elapsed_time_shield, self.temp1.temp_shield[ilabel], '--',label = self.run_label1)
+            #plt.plot(self.temp2.elapsed_time_shield, self.temp2.temp_shield[ilabel], '--',label = self.run_label2)
+            plt.plot(self.temp.elapsed_time_PTC_shield, self.temp.temp_shield[ilabel],label = self.run_label)
+            plt.plot(self.temp1.elapsed_time_PTC_shield, self.temp1.temp_shield[ilabel], '--',label = self.run_label1)
+            plt.plot(self.temp2.elapsed_time_PTC_shield, self.temp2.temp_shield[ilabel], '--',label = self.run_label2)
             plt.title(ilabel.split('[')[0])
             plt.ylabel('temperature [K]')
             plt.xlabel('elapsed time [h]')
@@ -181,14 +215,14 @@ class comp_temp(read_temp):
             if log is True:
                 plt.yscale('log')
             if ylim is True:
-                plt.ylim(iylim)                            
+                plt.ylim(iylim)
             if xlim is not False:
-                plt.xlim(xlim)                            
+                plt.xlim(xlim)
         plt.tight_layout()
         os.makedirs('fig/', exist_ok=True)
         ntime = datetime.datetime.strftime(datetime.datetime.now(tz = datetime.timezone.utc), STR_FMT)
         ntime = 'det_shield_' + ntime + '.jpg'
-        save_path = os.path.join('fig/', ntime)
+        save_path = os.path.join('/data/sueno/home/workspace/script/gb_log_read/fig/', ntime)
         plt.savefig(save_path)
         plt.clf()
         plt.close()
@@ -201,17 +235,27 @@ def main(log, ylim, xlen, xlim):
     en_202107 = st_202107 + datetime.timedelta(hours = xlen)
     st_202112 = datetime.datetime(2021, 12, 23, 19, 45, 00)
     en_202112 = st_202112 + datetime.timedelta(hours = xlen)
+    st_202208 = datetime.datetime(2022, 8, 26, 21, 00, 00)
+    en_202208 = st_202208 + datetime.timedelta(hours = xlen)
+    st_202301 = datetime.datetime(2023, 1, 13, 7, 00, 00)
+    en_202301 = st_202301 + datetime.timedelta(hours = xlen)
+
 
     run_202103 = [st_202103, en_202103]
     run_202107 = [st_202107, en_202107]
     run_202112 = [st_202112, en_202112]
+    run_202208 = [st_202208, en_202208]
+    run_202301 = [st_202301, en_202301]    
 #    run_202103 = ['2021-03-19T21:33:00', '2021-03-25T00:00:00']
 #    run_202107 = ['2021-07-06T20:27:00', '2021-07-12T00:00:00']
 #    run_202112 = ['2021-12-23T19:45:00', None]
-    comp_data = comp_temp(run_202112, run_202103, run_202107)
+#    comp_data = comp_temp(run_202112, run_202103, run_202107)
+#    run_labels = ['202208', '202112', '202107']
+    run_labels = ['202112', '202208', '202301']    
+#    comp_data = comp_temp(run_202208, run_202112, run_202107, run_labels = run_labels)
+    comp_data = comp_temp(run_202112, run_202208, run_202301, run_labels = run_labels)    
     comp_data.plot_comp_he10(log = log, ylim = ylim, xlim = xlim)
     comp_data.plot_comp_det_shield(log = log, ylim = ylim, xlim = xlim)
-    
 
 
 if __name__ == "__main__":
