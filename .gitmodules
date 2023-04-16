@@ -1,0 +1,3 @@
+[submodule "logreader"]
+	path = logreader
+	url = git@github.com:groundbird/logreader.git
