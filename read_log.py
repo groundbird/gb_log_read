@@ -13,6 +13,8 @@ def read_temp_shield(dt_start, dt_end):
     ----------
     dt_start : datetime.datetime
         start time with timezone
+        e.g., from unixtime
+        dt_tz = datetime.datetime.fromtimestamp(utime,datetime.timezone.utc)
     dt_end   : datetime.datetime
         end time with timezone
 
@@ -80,18 +82,19 @@ def read_gaulli_final(dt_start, dt_end):
     
 def read_logs(dt_start, dt_end):
     bme = read_bme(dt_start, dt_end)
-    bmeenc = read_bmeenc(dt_start, dt_end)
+    #bmeenc = read_bmeenc(dt_start, dt_end)
     det = read_temp_detector(dt_start, dt_end)
     he10 = read_temp_he10(dt_start, dt_end).drop([':PU:', ':HD:'], axis = 1)
     shield = read_temp_shield(dt_start, dt_end)
     stella = read_stella(dt_start, dt_end)
     ptc = read_ptc(dt_start, dt_end).drop(['ON/OFF', 'Error_No'], axis = 1)
     
-    bmes = pd.merge(bme, bmeenc, on=['Localtime', 'Unixtime'], how='outer', suffixes=['_dome', '_enc'])
-    dets = pd.merge(bmes, det, on = ['Localtime', 'Unixtime'], how = 'outer')
+    #bmes = pd.merge(bme, bmeenc, on=['Localtime', 'Unixtime'], how='outer', suffixes=['_dome', '_enc'])
+    #dets = pd.merge(bmes, det, on = ['Localtime', 'Unixtime'], how = 'outer')
+    dets = pd.merge(bme, det, on = ['Localtime', 'Unixtime'], how = 'outer')
     he10s = pd.merge(dets, he10, on = ['Localtime', 'Unixtime'], how = 'outer')
     shields = pd.merge(he10s, shield, on = ['Localtime', 'Unixtime'], how = 'outer')
-    stellas = pd.merge(shields, stella, on = ['Localtime', 'Unixtime'], how = 'outer')
+    stellas = pd.merge(shields, stella, on = ['Localtime', 'Unixtime'], how = 'outer', suffixes=['_bme', '_stella'])
     ptcs = pd.merge(stellas, ptc, on = ['Localtime', 'Unixtime'], how = 'outer')
     log = ptcs.sort_index().interpolate().dropna()
     return log
